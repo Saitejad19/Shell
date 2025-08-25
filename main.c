@@ -1,8 +1,54 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#define delimiters " "
+#include<stdio.h>    // for printf(), perror()
+#include<stdlib.h>  // for malloc(), realloc(), free(), exit(), EXIT_SUCCESS, EXIT_FAILURE
+#include<string.h>    // for strtok(), strcmp()
+#include <unistd.h>    // for fork(), execvp(), chdir(), pid_t
+#include <sys/wait.h>  // for waitpid(), WUNTRACED
+
+#define delimiters " \t\r\n"
 #define buffer_size 128
+
+// Function declaractions
+
+int shell_cd(char **args);
+int shell_help(char **args);
+int shell_exit(char **args);
+
+// Global var
+char *builtins[] = {"cd","help","exit"};
+
+int (*builtin_funcs[]) (char**) = { &shell_cd, &shell_help, &shell_exit};
+
+int num_builtins = sizeof(builtins) / sizeof(char*);
+
+// Function implementations
+
+int shell_cd(char ** args){
+    if(args[1]==NULL)
+        perror("Expected a directory");
+    else{
+        if(chdir(args[1])!=0)
+            perror("chdir failed");
+        else
+            printf("Directory changed to %s\n", args[1]);
+    }
+    return 1;
+}
+
+
+int shell_help(char ** args){
+    printf("Shell Help:\n");
+    printf("The following are available functions:\n");
+    for(int i=0;i<num_builtins;i++){
+        printf("%s\n", builtins[i]);
+    }
+    return 1;
+}
+
+int shell_exit(char ** args){
+    return 0;
+}
+
+
 
 char * shell_read_line(){
     char *line = NULL;
@@ -49,21 +95,37 @@ char** shell_parse_line(char *line){
 }
 
 
-int shell_execute(char **args){
+int shell_launch(char **args){
     pid_t pid, wpid;
     int status;
     pid = fork();
     if(pid==0){     //Child process
-        execvp(args[0], args);
+        if(execvp(args[0], args)==-1){
+            perror("execvp failed");
+            exit(EXIT_FAILURE);
+        }
     }
+    else if(pid<0)
+        perror("fork failed");
     else{    // Parent process
         do{
             wpid = waitpid(pid, &status, WUNTRACED);
         }while(!WIFEXITED(status) && !WIFSIGNALED(status));
     }
-    return 0;
+    return 1;
 }
 
+
+int shell_execute(char **args){
+    if(args[0]==NULL)
+        return 1;
+    for(int i=0;i<num_builtins;i++){
+        if(strcmp(args[0], builtins[i])==0){
+            return (*builtin_funcs[i])(args);
+        }
+    }
+    return shell_launch(args);
+}
 
 
 void shell_loop(){
@@ -76,8 +138,8 @@ void shell_loop(){
         line = shell_read_line();
         args = shell_parse_line(line);
         status = shell_execute(args);
-        // free(line);
-        // free(args);
+        free(line);
+        free(args);
     }while (status);
 
 }
